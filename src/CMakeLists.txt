@@ -565,6 +565,7 @@ set( SOURCES
       menus/CloudLoginHelper.cpp
       menus/HelpMenus.cpp
       menus/LabelMenus.cpp
+      menus/ScoreMenus.cpp
       menus/MenuHelper.cpp
       menus/MenuHelper.h
       menus/NavigationMenus.cpp
@@ -673,6 +674,12 @@ set( SOURCES
       tracks/labeltrack/ui/LabelTrackVRulerControls.h
       tracks/labeltrack/ui/LabelTrackView.cpp
       tracks/labeltrack/ui/LabelTrackView.h
+      tracks/scoretrack/ui/ScoreTrackControls.cpp
+      tracks/scoretrack/ui/ScoreTrackControls.h
+      tracks/scoretrack/ui/ScoreTrackVRulerControls.cpp
+      tracks/scoretrack/ui/ScoreTrackVRulerControls.h
+      tracks/scoretrack/ui/ScoreTrackView.cpp
+      tracks/scoretrack/ui/ScoreTrackView.h
       tracks/playabletrack/notetrack/ui/NoteTrackAffordanceControls.h
       tracks/playabletrack/notetrack/ui/NoteTrackAffordanceControls.cpp
       tracks/playabletrack/notetrack/ui/NoteTrackButtonHandle.cpp
@@ -1064,14 +1071,17 @@ if( CMAKE_SYSTEM_NAME MATCHES "Windows" )
          RESOURCE "${WIN_RESOURCES}"
    )
 
-   # Copy the VC runtime libraries as well
-   add_custom_command(
-      TARGET
-         ${TARGET}
-      COMMAND
-         ${CMAKE_COMMAND} -E copy ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} ${_DEST}
-      POST_BUILD
-   )
+   # Copy the VC runtime libraries as well (nothing to copy if CMake did not
+   # find a matching redistributable directory)
+   if( CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS )
+      add_custom_command(
+         TARGET
+            ${TARGET}
+         COMMAND
+            ${CMAKE_COMMAND} -E copy ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} ${_DEST}
+         POST_BUILD
+      )
+   endif()
 
    # Copy resource files into build folder
    add_custom_command(
@@ -1298,6 +1308,7 @@ set( AUDACITY_LIBRARIES
    lib-tags-interface
    lib-wx-init-interface
    lib-time-track-interface
+   lib-score-track-interface
    lib-stretching-sequence-interface
    lib-import-export-interface
    lib-export-ui-interface
