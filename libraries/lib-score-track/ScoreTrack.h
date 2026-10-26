@@ -162,6 +162,10 @@ public:
    std::vector<Measure> GetMeasures() const;
    //! Removes the bar line closest to @p time, wherever it is
    bool RemoveNearestBarLine(double time);
+
+   //! Multiplies every time (notes, how long they sound, bar lines) by
+   //! @p ratio: used when the project tempo changes
+   void ScaleTime(double ratio);
    void AddBarLine(double time);
    //! Removes the bar line closest to @p time if it is within @p tolerance
    bool RemoveBarLineNear(double time, double tolerance);

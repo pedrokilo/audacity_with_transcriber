@@ -279,6 +279,16 @@ std::vector<ScoreTrack::Measure> ScoreTrack::GetMeasures() const
    return measures;
 }
 
+void ScoreTrack::ScaleTime(double ratio)
+{
+   for (auto &note : mNotes) {
+      note.time *= ratio;
+      note.length *= ratio;
+   }
+   for (auto &bar : mBarLines)
+      bar *= ratio;
+}
+
 bool ScoreTrack::RemoveNearestBarLine(double time)
 {
    return RemoveBarLineNear(time, std::numeric_limits<double>::max());
