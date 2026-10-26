@@ -12,6 +12,7 @@
 #include "../TrackPanel.h"
 #include "Viewport.h"
 #include "CommandContext.h"
+#include "ViewInfo.h"
 #include "toolbars/ToolManager.h"
 
 namespace {

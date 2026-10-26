@@ -2,6 +2,7 @@
 #include "../Clipboard.h"
 #include "../CommonCommandFlags.h"
 #include "LabelTrack.h"
+#include "ScoreTrack.h"
 #include "../MenuCreator.h"
 #include "NoteTrack.h"
 #include "Project.h"
@@ -866,6 +867,19 @@ void OnTrim(const CommandContext &context)
       XO("Trim Audio"));
 }
 
+// Split and Join apply to audio clips and to the bars of a score
+const ReservedCommandFlag &WaveOrScoreTracksSelectedFlag()
+{
+   static ReservedCommandFlag flag{
+      [](const AudacityProject &project) {
+         const auto &tracks = TrackList::Get(project);
+         return !tracks.Selected<const WaveTrack>().empty()
+            || !tracks.Selected<const ScoreTrack>().empty();
+      }
+   };
+   return flag;
+}
+
 void OnSplit(const CommandContext &context)
 {
    auto &project = context.project;
@@ -874,6 +888,14 @@ void OnSplit(const CommandContext &context)
    if (auto *pTrack = context.temporarySelection.pTrack) {
       if (auto pWaveTrack = dynamic_cast<WaveTrack*>(pTrack))
          pWaveTrack->Split(sel0, sel1);
+      else if (auto pScoreTrack = dynamic_cast<ScoreTrack*>(pTrack)) {
+         // Dividing a score draws a bar line where the cursor is
+         pScoreTrack->AddBarLine(sel0);
+         if (sel1 > sel0)
+            pScoreTrack->AddBarLine(sel1);
+         ProjectHistory::Get(project).PushState(XO("Split"), XO("Split"));
+         return;
+      }
       else
          // Did nothing, don't push history
          return;
@@ -881,6 +903,13 @@ void OnSplit(const CommandContext &context)
    else
       for (auto wt : tracks.Selected<WaveTrack>())
          wt->Split(sel0, sel1);
+
+   // Splitting the audio also divides the bar on the selected scores
+   for (auto st : tracks.Selected<ScoreTrack>()) {
+      st->AddBarLine(sel0);
+      if (sel1 > sel0)
+         st->AddBarLine(sel1);
+   }
 
    ProjectHistory::Get( project ).PushState(XO("Split"), XO("Split"));
 #if 0
@@ -985,6 +1014,23 @@ void OnJoin(const CommandContext &context)
    auto &project = context.project;
    auto &tracks = TrackList::Get(project);
    auto &selectedRegion = ViewInfo::Get(project).selectedRegion;
+
+   // Joining on a score removes the bar line closest to the cursor
+   {
+      bool removed = false;
+      if (auto *pScoreTrack =
+            dynamic_cast<ScoreTrack*>(context.temporarySelection.pTrack))
+         removed = pScoreTrack->RemoveNearestBarLine(selectedRegion.t0());
+      else
+         for (auto st : tracks.Selected<ScoreTrack>())
+            removed = st->RemoveNearestBarLine(selectedRegion.t0()) || removed;
+      if (removed)
+         ProjectHistory::Get(project).PushState(XO("Join"), XO("Join"));
+      if (context.temporarySelection.pTrack
+          && dynamic_cast<ScoreTrack*>(context.temporarySelection.pTrack))
+         return;
+   }
+
    const auto selectedTracks = tracks.Selected<WaveTrack>();
    TimeStretching::WithClipRenderingProgress(
       [&](const ProgressReporter& reportProgress) {
@@ -1218,7 +1264,7 @@ auto EditMenu()
             Section( "",
                /* i18n-hint: (verb) It's an item on a menu. */
                Command( wxT("Split"), XXO("Sp&lit"), OnSplit,
-                  AudioIONotBusyFlag() | WaveTracksSelectedFlag(),
+                  AudioIONotBusyFlag() | WaveOrScoreTracksSelectedFlag(),
                   Options{ wxT("Ctrl+I") } ),
                Command( wxT("SplitNew"), XXO("Split Ne&w"), OnSplitNew,
                   AudioIONotBusyFlag() | TimeSelectedFlag() | WaveTracksSelectedFlag(),
@@ -1228,7 +1274,8 @@ auto EditMenu()
             Section( "",
                /* i18n-hint: (verb)*/
                Command( wxT("Join"), XXO("&Join"), OnJoin,
-                  JoinClipsAvailableFlag(), wxT("Ctrl+J") ),
+                  AudioIONotBusyFlag() | WaveOrScoreTracksSelectedFlag(),
+                  wxT("Ctrl+J") ),
                Command( wxT("Disjoin"), XXO("Detac&h at Silences"), OnDisjoin,
                   NotBusyTimeAndTracksFlags, wxT("Ctrl+Alt+J") )
             )

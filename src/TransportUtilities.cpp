@@ -9,6 +9,8 @@
 
 **********************************************************************/
 
+#include "ScoreSequence.h"
+#include "ScoreTrack.h"
 #include "TransportUtilities.h"
 
 #include <thread>
@@ -215,6 +217,14 @@ TransportSequences MakeTransportTracks(
       for (auto pTrack : range)
          result.playbackSequences.push_back(
             StretchingSequence::Create(*pTrack, pTrack->GetClipInterfaces()));
+   }
+   {
+      // Score tracks are synthesised on demand, like audio
+      const auto range = trackList.Any<ScoreTrack>()
+         + (selectedOnly ? &Track::IsSelected : &Track::Any);
+      for (auto pTrack : range)
+         result.playbackSequences.push_back(
+            ScoreSequence::Create(pTrack->SharedPointer<ScoreTrack>()));
    }
    if (nonWaveToo) {
       const auto range = trackList.Any<const PlayableTrack>() +

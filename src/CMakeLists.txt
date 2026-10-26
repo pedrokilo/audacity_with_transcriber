@@ -674,6 +674,19 @@ set( SOURCES
       tracks/labeltrack/ui/LabelTrackVRulerControls.h
       tracks/labeltrack/ui/LabelTrackView.cpp
       tracks/labeltrack/ui/LabelTrackView.h
+      tracks/scoretrack/ui/ScoreAudio.cpp
+      tracks/scoretrack/ui/ScoreAudio.h
+      tracks/scoretrack/ui/ScoreFont.cpp
+      tracks/scoretrack/ui/ScoreFont.h
+      tracks/scoretrack/ui/ScoreGainSliderHandle.cpp
+      tracks/scoretrack/ui/ScoreGainSliderHandle.h
+      tracks/scoretrack/ui/ScoreKeyboard.cpp
+      tracks/scoretrack/ui/ScoreKeyboard.h
+      tracks/scoretrack/ui/ScoreLayout.h
+      tracks/scoretrack/ui/ScoreNoteHandle.cpp
+      tracks/scoretrack/ui/ScoreNoteHandle.h
+      tracks/scoretrack/ui/ScoreSound.cpp
+      tracks/scoretrack/ui/ScoreSound.h
       tracks/scoretrack/ui/ScoreTrackControls.cpp
       tracks/scoretrack/ui/ScoreTrackControls.h
       tracks/scoretrack/ui/ScoreTrackVRulerControls.cpp
@@ -1082,6 +1095,16 @@ if( CMAKE_SYSTEM_NAME MATCHES "Windows" )
          POST_BUILD
       )
    endif()
+
+   # The music font used by the score tracks (SIL Open Font License)
+   add_custom_command(
+      TARGET
+         ${TARGET}
+      COMMAND
+         ${CMAKE_COMMAND} -E copy
+            ${CMAKE_CURRENT_SOURCE_DIR}/tracks/scoretrack/fonts/Leland.otf ${_DEST}
+      POST_BUILD
+   )
 
    # Copy resource files into build folder
    add_custom_command(
