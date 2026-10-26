@@ -174,16 +174,61 @@ void DrawNote(wxDC &dc, const ScoreLayout &layout, const ScoreTrack &track,
 }
 
 namespace {
-//! Where a note starts inside a bar, in 32nd notes. Notes are placed by hand,
-//! so for the rhythm (rests and beams) the start is moved to the grid of the
-//! note's own value: an eighth note begins on a multiple of an eighth.
-int SnappedStart(const ScoreNote &note, double barStart, double barEnd, int barUnits)
+//! The bar each note falls in and where it starts inside it, in 32nd notes.
+//!
+//! Notes are placed by hand, so for the rhythm (rests and beams) they are
+//! moved onto a grid, one after the other inside a bar: every note goes to the
+//! grid slot of its own value (an eighth begins on a multiple of an eighth) but
+//! never before the end of the previous note, and a gap is only left where the
+//! notes really are far apart. So six eighth notes placed a little unevenly
+//! still make six eighth notes, with no rest in between.
+struct Rhythm {
+   std::vector<int> bar;     //!< -1: outside every bar
+   std::vector<int> start;
+};
+
+Rhythm AnalyzeRhythm(const ScoreTrack &track)
 {
-   const double raw = (note.time - barStart) / (barEnd - barStart) * barUnits;
-   const int grid = std::max(1, ScoreTheory::UnitsPerWhole >> static_cast<int>(note.duration));
-   const int units = static_cast<int>(std::lround(raw / grid)) * grid;
-   const int length = ScoreTheory::NoteUnits(note.duration, note.dots);
-   return std::clamp(units, 0, std::max(0, barUnits - length));
+   const auto &notes = track.GetNotes();
+   const auto measures = track.GetMeasures();
+   const int barUnits = ScoreTheory::MeasureUnits(track.GetTimeSignature());
+   Rhythm rhythm{ std::vector<int>(notes.size(), -1), std::vector<int>(notes.size(), -1) };
+
+   for (size_t m = 0; m < measures.size(); ++m) {
+      const double length = measures[m].end - measures[m].start;
+      if (length <= 0.0)
+         continue;
+      int previousEnd = 0;
+      int previousStart = 0;
+      double previousTime = -1.0;
+      for (size_t i = 0; i < notes.size(); ++i) {
+         const auto &note = notes[i];
+         if (note.time < measures[m].start - 1e-6 || note.time >= measures[m].end - 1e-6)
+            continue;
+         rhythm.bar[i] = static_cast<int>(m);
+
+         const int units = ScoreTheory::NoteUnits(note.duration, note.dots);
+         int start;
+         if (previousTime >= 0.0 && std::abs(note.time - previousTime) < 1e-6)
+            start = previousStart;                       // notes of a chord
+         else {
+            const double raw = (note.time - measures[m].start) / length * barUnits;
+            const int grid = std::max(1,
+               ScoreTheory::UnitsPerWhole >> static_cast<int>(note.duration));
+            start = static_cast<int>(std::lround(raw / grid)) * grid;
+            start = std::max(start, previousEnd);
+            // Not far enough from the previous note to be a rest
+            if (start > previousEnd && raw < previousEnd + 0.75 * grid)
+               start = previousEnd;
+         }
+         start = std::clamp(start, 0, std::max(0, barUnits - units));
+         rhythm.start[i] = start;
+         previousStart = start;
+         previousTime = note.time;
+         previousEnd = std::max(previousEnd, start + units);
+      }
+   }
+   return rhythm;
 }
 
 bool Beamable(const ScoreNote &note)
@@ -194,26 +239,19 @@ bool Beamable(const ScoreNote &note)
 //! Groups of consecutive notes that are joined by beams, as MuseScore does:
 //! eighth notes and shorter within one beat of a bar. Where there are no bar
 //! lines, notes that follow each other closely are joined.
-std::vector<std::vector<size_t>> BeamGroups(const ScoreTrack &track)
+std::vector<std::vector<size_t>> BeamGroups(const ScoreTrack &track, const Rhythm &rhythm)
 {
    const auto &notes = track.GetNotes();
-   const auto measures = track.GetMeasures();
    const auto ts = track.GetTimeSignature();
-   const int barUnits = ScoreTheory::MeasureUnits(ts);
    const bool compound = ts.denominator == 8 && ts.numerator >= 6
       && ts.numerator % 3 == 0;
    const int beatUnits = compound ? 12 : std::max(1, ScoreTheory::UnitsPerWhole / ts.denominator);
 
    // Which bar and beat a note falls in; bar is -1 outside every bar
-   auto place = [&](const ScoreNote &note) {
-      for (size_t m = 0; m < measures.size(); ++m) {
-         if (note.time >= measures[m].start - 1e-6 && note.time < measures[m].end - 1e-6) {
-            const int units = SnappedStart(
-               note, measures[m].start, measures[m].end, barUnits);
-            return std::make_pair(static_cast<int>(m), units / beatUnits);
-         }
-      }
-      return std::make_pair(-1, -1);
+   auto place = [&](size_t index) {
+      if (rhythm.bar[index] < 0)
+         return std::make_pair(-1, -1);
+      return std::make_pair(rhythm.bar[index], rhythm.start[index] / beatUnits);
    };
 
    std::vector<std::vector<size_t>> groups;
@@ -233,8 +271,8 @@ std::vector<std::vector<size_t>> BeamGroups(const ScoreTrack &track)
          const auto &previous = notes[current.back()];
          bool join = notes[i].time > previous.time + 1e-6;
          if (join) {
-            const auto a = place(previous);
-            const auto b = place(notes[i]);
+            const auto a = place(current.back());
+            const auto b = place(i);
             if (a.first >= 0 || b.first >= 0)
                join = a == b;
             else
@@ -496,7 +534,10 @@ void ScoreTrackView::Draw(
       // it gets the rest of a whole bar; a bar with some notes gets rests in
       // the gaps, split at the beats.
       const int barUnits = ScoreTheory::MeasureUnits(timeSignature);
-      for (const auto &measure : track.GetMeasures()) {
+      const Rhythm rhythm = AnalyzeRhythm(track);
+      const auto measures = track.GetMeasures();
+      for (size_t measureIndex = 0; measureIndex < measures.size(); ++measureIndex) {
+         const auto &measure = measures[measureIndex];
          const int x0 = timeToX(measure.start);
          const int x1 = timeToX(measure.end);
          if (x1 < rect.x || x0 > rect.x + rect.width)
@@ -507,12 +548,12 @@ void ScoreTrackView::Draw(
 
          struct Span { int from; int to; };
          std::vector<Span> occupied;
-         for (const auto &note : notes) {
-            if (note.time < measure.start - 1e-6 || note.time >= measure.end - 1e-6)
+         for (size_t i = 0; i < notes.size(); ++i) {
+            if (rhythm.bar[i] != static_cast<int>(measureIndex))
                continue;
-            const int from = SnappedStart(note, measure.start, measure.end, barUnits);
+            const int from = rhythm.start[i];
             const int to = std::min(barUnits,
-               from + ScoreTheory::NoteUnits(note.duration, note.dots));
+               from + ScoreTheory::NoteUnits(notes[i].duration, notes[i].dots));
             occupied.push_back({ from, to });
          }
          std::sort(occupied.begin(), occupied.end(),
@@ -550,7 +591,7 @@ void ScoreTrackView::Draw(
       }
 
       // Notes, with beams joining the eighth notes and shorter ones
-      const auto groups = BeamGroups(track);
+      const auto groups = BeamGroups(track, AnalyzeRhythm(track));
       std::vector<bool> beamed(notes.size(), false);
       for (const auto &group : groups)
          for (size_t index : group)
