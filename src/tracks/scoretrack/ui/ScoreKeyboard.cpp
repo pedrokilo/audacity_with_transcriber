@@ -94,7 +94,7 @@ ScoreKeyboard::ScoreKeyboard(wxWindow *parent)
 
    // --- Note values
    auto *durations = new wxBoxSizer(wxHORIZONTAL);
-   const wxFont noteFont = ScoreFont::Get(36);
+   const wxFont noteFont = ScoreFont::Get(26);
    for (int i = 0; i < static_cast<int>(ScoreDuration::Count); ++i) {
       auto *button = new wxToggleButton(panel, wxID_ANY,
          ScoreFont::Text(DurationGlyphs[i]),
@@ -135,7 +135,7 @@ ScoreKeyboard::ScoreKeyboard(wxWindow *parent)
    for (int i = 0; i < 3; ++i) {
       mAcc[i] = new wxToggleButton(panel, wxID_ANY, S(accLabels[i]),
          wxDefaultPosition, wxSize(44, 44));
-      mAcc[i]->SetFont(ScoreFont::Get(32));
+      mAcc[i]->SetFont(ScoreFont::Get(24));
       mAcc[i]->SetToolTip(S(accTips[i]));
       mAcc[i]->Bind(wxEVT_TOGGLEBUTTON, [this, i](wxCommandEvent &) {
          for (int j = 0; j < 3; ++j)
