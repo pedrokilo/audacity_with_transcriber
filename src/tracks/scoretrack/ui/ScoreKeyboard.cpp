@@ -11,7 +11,13 @@
 #include "../../../ProjectWindows.h"
 #include "../../../TrackPanel.h"
 
+#include <algorithm>
+#include <functional>
+
+#include <wx/bitmap.h>
 #include <wx/button.h>
+#include <wx/dcmemory.h>
+#include <wx/image.h>
 #include <wx/choice.h>
 #include <wx/font.h>
 #include <wx/sizer.h>
@@ -30,12 +36,66 @@ wxString S(const char *utf8)
    return wxString::FromUTF8(utf8);
 }
 
-// Musical symbols live in the Segoe UI Symbol font on Windows
-wxFont SymbolFont(int pixels)
+// A bitmap of something drawn in black, centred on what was actually inked:
+// the text of a button is centred by its line box, which cuts the stems and
+// flags of the tall music symbols.
+wxBitmap InkBitmap(const wxSize &size,
+   const std::function<void(wxDC &, const wxSize &)> &draw)
 {
-   wxFont font(wxFontInfo(wxSize(0, pixels)).FaceName("Segoe UI Symbol"));
-   return font;
+   // Work on a larger canvas, white on black ink, and look for the ink
+   const wxSize canvas(size.x * 3, size.y * 3);
+   wxBitmap work(canvas.x, canvas.y, 24);
+   {
+      wxMemoryDC dc(work);
+      dc.SetBackground(*wxWHITE_BRUSH);
+      dc.Clear();
+      draw(dc, canvas);
+      dc.SelectObject(wxNullBitmap);
+   }
+   const wxImage image = work.ConvertToImage();
+
+   int minX = canvas.x, minY = canvas.y, maxX = -1, maxY = -1;
+   for (int y = 0; y < canvas.y; ++y)
+      for (int x = 0; x < canvas.x; ++x)
+         if (image.GetRed(x, y) < 200) {
+            minX = std::min(minX, x);
+            maxX = std::max(maxX, x);
+            minY = std::min(minY, y);
+            maxY = std::max(maxY, y);
+         }
+
+   wxImage out(size.x, size.y);
+   out.InitAlpha();
+   for (int y = 0; y < size.y; ++y)
+      for (int x = 0; x < size.x; ++x) {
+         out.SetRGB(x, y, 20, 20, 24);
+         out.SetAlpha(x, y, 0);
+      }
+   if (maxX >= minX) {
+      const int offsetX = (size.x - (maxX - minX + 1)) / 2 - minX;
+      const int offsetY = (size.y - (maxY - minY + 1)) / 2 - minY;
+      for (int y = minY; y <= maxY; ++y)
+         for (int x = minX; x <= maxX; ++x) {
+            const int tx = x + offsetX, ty = y + offsetY;
+            if (tx >= 0 && tx < size.x && ty >= 0 && ty < size.y)
+               out.SetAlpha(tx, ty, static_cast<unsigned char>(255 - image.GetRed(x, y)));
+         }
+   }
+   return wxBitmap(out);
 }
+
+//! A music glyph centred in a bitmap
+wxBitmap GlyphBitmap(int glyph, int pixels, const wxSize &size)
+{
+   return InkBitmap(size, [=](wxDC &dc, const wxSize &canvas) {
+      dc.SetFont(ScoreFont::Get(pixels));
+      dc.SetTextForeground(*wxBLACK);
+      ScoreFont::Draw(dc, glyph, canvas.x / 3, canvas.y * 2 / 3);
+   });
+}
+
+constexpr int ButtonSize = 44;
+const wxSize IconSize(ButtonSize - 8, ButtonSize - 8);
 
 struct TimeChoice { int num; int den; };
 constexpr TimeChoice TimeChoices[] = { { 6, 8 }, { 4, 4 }, { 2, 4 }, { 3, 4 } };
@@ -94,12 +154,10 @@ ScoreKeyboard::ScoreKeyboard(wxWindow *parent)
 
    // --- Note values
    auto *durations = new wxBoxSizer(wxHORIZONTAL);
-   const wxFont noteFont = ScoreFont::Get(26);
    for (int i = 0; i < static_cast<int>(ScoreDuration::Count); ++i) {
-      auto *button = new wxToggleButton(panel, wxID_ANY,
-         ScoreFont::Text(DurationGlyphs[i]),
-         wxDefaultPosition, wxSize(44, 44));
-      button->SetFont(noteFont);
+      auto *button = new wxToggleButton(panel, wxID_ANY, wxEmptyString,
+         wxDefaultPosition, wxSize(ButtonSize, ButtonSize));
+      button->SetBitmap(GlyphBitmap(DurationGlyphs[i], 30, IconSize));
       button->SetToolTip(S(DurationTips[i]));
       button->SetValue(i == static_cast<int>(mInput.duration));
       button->Bind(wxEVT_TOGGLEBUTTON, [this, i](wxCommandEvent &) {
@@ -112,30 +170,37 @@ ScoreKeyboard::ScoreKeyboard(wxWindow *parent)
 
    // --- Dot, rest, tie
    auto *modifiers = new wxBoxSizer(wxHORIZONTAL);
-   const wxFont smallSymbols = SymbolFont(22);
-   auto addToggle = [&](wxToggleButton *&slot, const char *label, const char *tip,
-                        const wxFont &font) {
-      slot = new wxToggleButton(panel, wxID_ANY, S(label),
-         wxDefaultPosition, wxSize(44, 44));
-      slot->SetFont(font);
+   auto addToggle = [&](wxToggleButton *&slot, const wxBitmap &bitmap, const char *tip) {
+      slot = new wxToggleButton(panel, wxID_ANY, wxEmptyString,
+         wxDefaultPosition, wxSize(ButtonSize, ButtonSize));
+      slot->SetBitmap(bitmap);
       slot->SetToolTip(S(tip));
       slot->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent &) { OnToggles(); });
       modifiers->Add(slot, 0, wxALL, 2);
    };
-   addToggle(mDot, "\xE2\x80\xA2", "Puntillo", smallSymbols);
-   addToggle(mRest, "\xEE\x93\xA5", "Silencio", noteFont);   // U+E4E5 quarter rest
-   addToggle(mTie, "\xE2\x8C\xA3", "Ligadura con la nota siguiente", smallSymbols);
-   addToggle(mBar, "|", "Barra de comp\xC3\xA1s: clic en el pentagrama para trazarla o quitarla", smallSymbols);
+   // The dot is a very small glyph: draw it larger
+   addToggle(mDot, GlyphBitmap(ScoreFont::AugmentationDot, 56, IconSize), "Puntillo");
+   addToggle(mRest, GlyphBitmap(ScoreFont::RestQuarter, 30, IconSize), "Silencio");
+   addToggle(mTie, InkBitmap(IconSize, [](wxDC &dc, const wxSize &canvas) {
+      dc.SetPen(wxPen(*wxBLACK, 2));
+      dc.SetBrush(*wxTRANSPARENT_BRUSH);
+      dc.DrawEllipticArc(canvas.x / 2 - 16, canvas.y / 2 - 8, 32, 16, 180, 360);
+   }), "Ligadura con la nota siguiente");
+   addToggle(mBar, InkBitmap(IconSize, [](wxDC &dc, const wxSize &canvas) {
+      dc.SetPen(wxPen(*wxBLACK, 2));
+      dc.DrawLine(canvas.x / 2, canvas.y / 2 - 14, canvas.x / 2, canvas.y / 2 + 14);
+   }), "Barra de comp\xC3\xA1s: clic en el pentagrama para trazarla o quitarla");
    root->Add(modifiers, 0, wxLEFT | wxRIGHT, 4);
 
    // --- Accidentals
    auto *accidentals = new wxBoxSizer(wxHORIZONTAL);
-   const char *accLabels[] = { "\xEE\x89\xA1", "\xEE\x89\xA2", "\xEE\x89\xA0" };   // natural, sharp, flat
+   const int accGlyphs[] = {
+      ScoreFont::AccidentalNatural, ScoreFont::AccidentalSharp, ScoreFont::AccidentalFlat };
    const char *accTips[] = { "Becuadro", "Sostenido", "Bemol" };
    for (int i = 0; i < 3; ++i) {
-      mAcc[i] = new wxToggleButton(panel, wxID_ANY, S(accLabels[i]),
-         wxDefaultPosition, wxSize(44, 44));
-      mAcc[i]->SetFont(ScoreFont::Get(24));
+      mAcc[i] = new wxToggleButton(panel, wxID_ANY, wxEmptyString,
+         wxDefaultPosition, wxSize(ButtonSize, ButtonSize));
+      mAcc[i]->SetBitmap(GlyphBitmap(accGlyphs[i], 30, IconSize));
       mAcc[i]->SetToolTip(S(accTips[i]));
       mAcc[i]->Bind(wxEVT_TOGGLEBUTTON, [this, i](wxCommandEvent &) {
          for (int j = 0; j < 3; ++j)
